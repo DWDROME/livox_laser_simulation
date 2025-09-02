@@ -4,7 +4,7 @@
 
 #include "livox_laser_simulation/livox_points_plugin.h"
 #include <ros/ros.h>
-#include <sensor_msgs/PointCloud.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <gazebo/physics/Model.hh>
 #include <gazebo/physics/MultiRayShape.hh>
 #include <gazebo/physics/PhysicsEngine.hh>
@@ -13,6 +13,10 @@
 #include <gazebo/transport/Node.hh>
 #include "livox_laser_simulation/csv_reader.hpp"
 #include "livox_laser_simulation/livox_ode_multiray_shape.h"
+
+#include <sensor_msgs/PointCloud.h>
+#include <sensor_msgs/point_cloud_conversion.h>  // PointCloud -> PointCloud2
+
 
 namespace gazebo {
 
@@ -56,7 +60,7 @@ void LivoxPointsPlugin::Load(gazebo::sensors::SensorPtr _parent, sdf::ElementPtr
     ROS_INFO_STREAM("ros topic name:" << curr_scan_topic);
     ros::init(argc, argv, curr_scan_topic);
     rosNode.reset(new ros::NodeHandle);
-    rosPointPub = rosNode->advertise<sensor_msgs::PointCloud>(curr_scan_topic, 5);
+    rosPointPub = rosNode->advertise<sensor_msgs::PointCloud2>(curr_scan_topic, 5);
 
     raySensor = _parent;
     auto sensor_pose = raySensor->Pose();
@@ -126,51 +130,77 @@ void LivoxPointsPlugin::OnNewLaserScans() {
         auto verticle_min = VerticalAngleMin().Radian();
         auto verticle_incre = VerticalAngleResolution();
 
-        sensor_msgs::PointCloud scan_point;
-        scan_point.header.stamp = ros::Time::now();
-        scan_point.header.frame_id = raySensor->Name();
-        auto &scan_points = scan_point.points;
+        // sensor_msgs::PointCloud2 scan_point;
+        // scan_point.header.stamp = ros::Time::now();
+        // scan_point.header.frame_id = raySensor->Name();
+        // auto &scan_points = scan_point.points;
 
+        // for (auto &pair : points_pair) {
+        //     //int verticle_index = roundf((pair.second.zenith - verticle_min) / verticle_incre);
+        //     //int horizon_index = roundf((pair.second.azimuth - angle_min) / angle_incre);
+        //     //if (verticle_index < 0 || horizon_index < 0) {
+        //     //   continue;
+        //     //}
+        //     //if (verticle_index < verticalRayCount && horizon_index < rayCount) {
+        //     //   auto index = (verticalRayCount - verticle_index - 1) * rayCount + horizon_index;
+        //         auto range = rayShape->GetRange(pair.first);
+        //         auto intensity = rayShape->GetRetro(pair.first);
+        //         if (range >= RangeMax()) {
+        //             range = 0;
+        //         } else if (range <= RangeMin()) {
+        //             range = 0;
+        //         }
+        //         //scan->set_ranges(index, range);
+        //         //scan->set_intensities(index, intensity);
+
+        //         auto rotate_info = pair.second;
+        //         ignition::math::Quaterniond ray;
+        //         ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+        //         //                auto axis = rotate * ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
+        //         //                auto point = range * axis + world_pose.Pos();//转换成世界坐标系
+
+        //         auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
+        //         auto point = range * axis;
+        //         scan_points.emplace_back();
+        //         scan_points.back().x = point.X();
+        //         scan_points.back().y = point.Y();
+        //         scan_points.back().z = point.Z();
+        //     //} else {
+
+        //     //    //                ROS_INFO_STREAM("count is wrong:" << verticle_index << "," << verticalRayCount << ","
+        //     //    //                << horizon_index
+        //     //    //                          << "," << rayCount << "," << pair.second.zenith << "," <<
+        //     //    //                          pair.second.azimuth);
+        //     //}
+        // }
+        // if (scanPub && scanPub->HasConnections()) scanPub->Publish(laserMsg);
+        // rosPointPub.publish(scan_point);
+        
+        sensor_msgs::PointCloud cloud;
+        cloud.header.stamp    = ros::Time::now();
+        cloud.header.frame_id = raySensor->Name();   // 或者你想要的 frame，比如 "livox_sensor"
+
+        cloud.points.reserve(points_pair.size());
         for (auto &pair : points_pair) {
-            //int verticle_index = roundf((pair.second.zenith - verticle_min) / verticle_incre);
-            //int horizon_index = roundf((pair.second.azimuth - angle_min) / angle_incre);
-            //if (verticle_index < 0 || horizon_index < 0) {
-            //   continue;
-            //}
-            //if (verticle_index < verticalRayCount && horizon_index < rayCount) {
-            //   auto index = (verticalRayCount - verticle_index - 1) * rayCount + horizon_index;
-                auto range = rayShape->GetRange(pair.first);
-                auto intensity = rayShape->GetRetro(pair.first);
-                if (range >= RangeMax()) {
-                    range = 0;
-                } else if (range <= RangeMin()) {
-                    range = 0;
-                }
-                //scan->set_ranges(index, range);
-                //scan->set_intensities(index, intensity);
+        auto range = rayShape->GetRange(pair.first);
+        if (range <= RangeMin() || range >= RangeMax()) range = 0.0;
 
-                auto rotate_info = pair.second;
-                ignition::math::Quaterniond ray;
-                ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
-                //                auto axis = rotate * ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
-                //                auto point = range * axis + world_pose.Pos();//转换成世界坐标系
+        const auto& rotate_info = pair.second;
+        ignition::math::Quaterniond ray;
+        ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+        auto axis  = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
+        auto point = range * axis;
 
-                auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
-                auto point = range * axis;
-                scan_points.emplace_back();
-                scan_points.back().x = point.X();
-                scan_points.back().y = point.Y();
-                scan_points.back().z = point.Z();
-            //} else {
-
-            //    //                ROS_INFO_STREAM("count is wrong:" << verticle_index << "," << verticalRayCount << ","
-            //    //                << horizon_index
-            //    //                          << "," << rayCount << "," << pair.second.zenith << "," <<
-            //    //                          pair.second.azimuth);
-            //}
+        geometry_msgs::Point32 p;
+        p.x = point.X(); p.y = point.Y(); p.z = point.Z();
+        cloud.points.emplace_back(p);
         }
-        if (scanPub && scanPub->HasConnections()) scanPub->Publish(laserMsg);
-        rosPointPub.publish(scan_point);
+
+        // 2) 转成 PointCloud2 再发
+        sensor_msgs::PointCloud2 cloud2;
+        sensor_msgs::convertPointCloudToPointCloud2(cloud, cloud2);
+        rosPointPub.publish(cloud2);
+
         ros::spinOnce();
     }
 }
